@@ -7,3 +7,5 @@ Inspired by the paper [A local cellular model for snow crystal growth - Clifford
 ![Animation of ice crystal growth by hexagonal cellular automata](https://github.com/richardassar/heXmas-ca/blob/master/xmas.gif?raw=true)
 
 [Watch on YouTube](https://www.youtube.com/watch?v=79j2x1dDjPo)
+
+[Run in browser](https://richardassar.github.io/heXmas-ca/)
