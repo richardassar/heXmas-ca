@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Season's Greetings from Richard Assar</title>	
+	
+		<!-- 
+			<author>
+				<name>Richard Assar</name>
+				<email>richard.assar@gmail.com</email> 
+			</author>
+		-->	
+
+		<script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" type="text/javascript"></script>
+		
+		<!-- Configuration -->
+		<script type="text/javascript">			
+			var config = {			
+				// Greeting text
+				'greeting' : {
+					'blurRadius' : 4,
+			
+					'upper' : {
+						'position' : 1 / 20, // Ratio of canvas.height
+						'font' : 'bold 192px Arial', // Font settings
+						//'text' : 'Season\'s Greetings' // Message text
+						'text' : 'Merry'
+					},
+
+					'central' : {
+						'position' : 7 / 20, // Ratio of canvas.height
+						'font' : 'bold 256px Arial', // Font settings
+						'text' : '\u2605' // '🎄' // Message text
+					},
+
+					'recipient' : {
+						'position' : 3 / 20,
+						'font' : 'bold 36px Arial'
+					},
+				
+					'lower' : {
+						'position' : 12 / 20,
+						'font' : 'bold 192px Arial',
+						'text' : 'Christmas'
+					}
+				},
+			
+				// General parameters
+				'canvasSize' : 1024, // Size of canvas
+				'iterations' : 4, // Number of iterations of the CA algorithm per visible frame
+				'alphaFactor' : 2, // Heatmap image alpha is raised to this power, higher value reduces effect and gradient of alpha channel
+				'maxFrames' : 500, // Maximum number of frames to render
+
+				// CA paramters
+				'density' : 0.000025, // Density of seed crystals on the initial image
+				'background' : 0.5, // Initial background value
+				'backgroundRange' : 0.0, // Random pertubation applied to background value
+				'addConst' : 0.0032, // Constant added to receptive cells
+				'alpha' : 2.0, // Coefficient used for diffusion calculation, neighbour/central cell weighting
+				'receptiveHeatFactor' : -2.0, // The coefficient of heat applied to receptive cells (negative implies increased cooling by heatmap)
+				'receptiveHeatFeedback' : 0.0, // The quantity of heat receptive cells feed back into non-receptive cells
+				'receptiveConstAccumulatorFactor' : 1.0, // Multiplicative factor against addConst accumulation for receptive cells
+				'nonreceptiveHeatFactor' : -0.0, // The coefficient of heat applied to nonreceptive cells
+				'nonreceptiveHeatFeedback' : 0.0, // The quantity of heat receptive cells feed back into non-receptive cells
+				'nonreceptiveDisplayFactor' : 1.0, // Multiplicative coefficient of nonreceptive component display
+				'nonreceptiveConstAccumulatorFactor' : 0.2 // Multiplicative factor against addConst accumulation for nonreceptive cells
+			};	
+		</script>
+
+		<!-- Page template -->
+		<script id="page" type="text/html">
+			<div id="content">		
+			</div>
+		</script>
+
+		<!-- Vertex shader -->
+		<script id="shader-vs" type="x-shader/x-vertex"> 
+			attribute vec3 aPos;
+			attribute vec2 aTexCoord;
+			varying vec2 vTexCoord;
+
+			void main(void) {
+				gl_Position = vec4(aPos, 1.0);			
+				vTexCoord = aTexCoord;
+			}
+		</script> 
+
+		<!-- CA calculation shader -->
+		<script id="shader-fs-pass1" type="x-shader/x-fragment">
+			#ifdef GL_ES
+				precision highp float;
+			#endif
+
+			const float d = 1.0 / <%= canvasSize %>;
+
+			const float addConst = <%= addConst %>;
+			const float alpha = <%= alpha %>;
+
+			uniform int pass;		
+			uniform sampler2D uTexSamp;
+		
+			varying vec2 vTexCoord;
+
+			vec4 pass1() {	
+				//
+				vec2 p = vec2(
+					vTexCoord.x,
+					-vTexCoord.y - vTexCoord.x * 0.5 + 0.25
+				);
+
+				float heat = texture2D(uTexSamp, p).z;
+
+				//
+				vec4 central = texture2D(uTexSamp, vTexCoord);
+		
+				float c = central.x + central.y;
+
+				vec4 tv1 = texture2D(uTexSamp, vTexCoord - vec2(0.0, d));			
+				float v1 = tv1.x + tv1.y;
+
+				vec4 tv2 = texture2D(uTexSamp, vTexCoord + vec2(0.0, d));			
+				float v2 = tv2.x + tv2.y;
+
+				vec4 tv3 = texture2D(uTexSamp, vTexCoord - vec2(d, 0.0));			
+				float v3 = tv3.x + tv3.y;
+
+				vec4 tv4 = texture2D(uTexSamp, vTexCoord + vec2(d, 0.0));			
+				float v4 = tv4.x + tv4.y;
+
+				vec4 tv5 = texture2D(uTexSamp, vTexCoord - vec2(d, -d));			
+				float v5 = tv5.x + tv5.y;
+
+				vec4 tv6 = texture2D(uTexSamp, vTexCoord + vec2(d, -d));			
+				float v6 = tv6.x + tv6.y;
+			
+				if(
+					c >= 1.0 || 
+					v1 >= 1.0 || 
+					v2 >= 1.0 || 
+					v3 >= 1.0 || 
+					v4 >= 1.0 || 
+					v5 >= 1.0 || 
+					v6 >= 1.0
+				) {				
+					return vec4(c + addConst - heat * <%= receptiveHeatFactor %>, <%= receptiveHeatFeedback %> * heat, central.z, central.w + addConst * <%= receptiveConstAccumulatorFactor %>);
+				} else {
+					return vec4(<%= nonreceptiveHeatFeedback %> * heat, c - heat * <%= nonreceptiveHeatFactor %>, central.z, central.w + addConst * <%= nonreceptiveConstAccumulatorFactor %>);
+				}
+			}		
+
+			void main(void) {
+				vec4 val = texture2D(uTexSamp, vTexCoord);
+			
+				gl_FragColor = pass1();
+			}	
+		</script>
+
+		<script id="shader-fs-pass2" type="x-shader/x-fragment">
+			#ifdef GL_ES
+				precision highp float;
+			#endif
+
+			const float d = 1.0 / <%= canvasSize %>;
+
+			const float addConst = <%= addConst %>;
+			const float alpha = <%= alpha %>;
+
+			uniform int pass;		
+			uniform sampler2D uTexSamp;
+		
+			varying vec2 vTexCoord;
+
+
+			vec4 pass2() {		
+				vec4 central = texture2D(uTexSamp, vTexCoord);
+		
+				// heat
+				vec2 p = vec2(
+					vTexCoord.x,
+					-vTexCoord.y - vTexCoord.x * 0.5 + 0.25
+				);
+			
+				float heat = texture2D(uTexSamp, vTexCoord).z;
+					
+				// recp				
+				float recp = central.x;
+			
+				// nrecp			
+				float c = central.y;
+			
+				float v1 = texture2D(uTexSamp, vTexCoord - vec2(0.0, d)).y;
+				float v2 = texture2D(uTexSamp, vTexCoord + vec2(0.0, d)).y;
+	
+				float v3 = texture2D(uTexSamp, vTexCoord - vec2(d, 0.0)).y;
+				float v4 = texture2D(uTexSamp, vTexCoord + vec2(d, 0.0)).y;
+		
+				float v5 = texture2D(uTexSamp, vTexCoord - vec2(d, -d)).y;
+				float v6 = texture2D(uTexSamp, vTexCoord + vec2(d, -d)).y;
+
+				float nrecp = c + alpha / 12.0 * (-6.0 * c + v1 + v2 + v3 + v4 + v5 + v6);
+		
+				return vec4(recp, nrecp, heat, central.w);
+			}
+
+			void main(void) {
+				vec4 val = texture2D(uTexSamp, vTexCoord);
+			
+				gl_FragColor = pass2();		
+			}	
+		</script>
+
+	 	<!-- Display shader -->
+		<script id="shader-fs-show" type="x-shader/x-fragment"> 	
+			#ifdef GL_ES
+				precision highp float;
+			#endif
+
+			uniform float frames;
+			uniform vec2 resolution;					
+			
+			uniform sampler2D uTexSamp0;
+			uniform sampler2D uTexSamp1;
+			varying vec2 vTexCoord;
+			
+			void main(void) {					
+				vec2 p = vec2(
+					vTexCoord.x,
+					0.25 + vTexCoord.y - vTexCoord.x * 0.5
+				);			
+
+				vec4 texel = texture2D(uTexSamp0, p);
+
+				//			
+				float val = clamp(texel.x - texel.w, 0.0, 1.0);
+
+				vec3 col = vec3(val);
+
+				//
+				float nrecp = (1.0 - texel.y) * <%= nonreceptiveDisplayFactor %>;
+
+				nrecp = clamp(nrecp, 0.0, 1.0);
+
+				col += vec3(nrecp * 0.01, nrecp * 0.2, nrecp * 0.8);
+
+				//
+				float overlay = texture2D(uTexSamp0, vec2(vTexCoord.x, -vTexCoord.y)).z;
+
+				float time = frames / <%= maxFrames %>;
+
+				col -= clamp(texel.x, 0.0, 1.0) * overlay;
+
+				//col += texture2D(uTexSamp1, vTexCoord).xyz;				
+
+				//
+				gl_FragColor = vec4(col, 1.0);
+			}
+		</script> 
+
+		<!-- Main script-->
+		<script type="text/javascript">	
+			// Globals
+			var 
+				canvas,
+				gl, 
+				prog,
+				prog_show, 
+				FBO, 
+				FBO2, 
+				texture1, 
+				texture2,
+				it = 1, 
+				frames = 0,
+				greetingImage,
+				exportFrame = 0,
+				pendingExportFrames = Math.floor(config.maxFrames / config.exportInterval);
+				
+			// void main() { ... }	
+			function main() {	
+				canvas = document.createElement("canvas");
+
+				canvas.width = canvas.height = config.canvasSize;
+
+				$("div#content").prepend(canvas);
+		
+				try { 
+					gl = canvas.getContext("webgl", {
+						'depth' : false 
+					});
+
+					gl.viewportWidth = canvas.width;
+					gl.viewportHeight = canvas.height;				
+				} catch(e) {					
+					document.body.removeChild(canvas);				
+					return;
+				}
+
+				//
+				if(!gl) {
+					alert("Could not create webgl context");
+					return;
+				}
+
+				var ext = gl.getExtension("OES_texture_float");
+
+				//
+	 			if(!ext) {
+					return;
+	 			}
+
+	 			//
+				prog_pass1 = gl.createProgram();
+		
+				gl.attachShader(prog_pass1, getShader(gl, "shader-vs"));
+				gl.attachShader(prog_pass1, getShader(gl, "shader-fs-pass1"));
+			
+				gl.linkProgram(prog_pass1);
+				gl.useProgram(prog_pass1);
+
+				//
+				prog_pass2 = gl.createProgram();
+		
+				gl.attachShader(prog_pass2, getShader(gl, "shader-vs"));
+				gl.attachShader(prog_pass2, getShader(gl, "shader-fs-pass2"));
+			
+				gl.linkProgram(prog_pass2);
+				gl.useProgram(prog_pass2);
+
+				//		
+				prog_show = gl.createProgram();		
+		
+				gl.attachShader(prog_show, getShader(gl, "shader-vs"));
+				gl.attachShader(prog_show, getShader(gl, "shader-fs-show"));
+			
+				gl.linkProgram(prog_show);
+				gl.useProgram(prog_show);
+
+				prog_show.resolution = gl.getUniformLocation(prog_show, "resolution");
+
+				gl.uniform2f(prog_show.resolution, gl.viewportWidth, gl.viewportHeight);		
+
+				prog_show.frames = gl.getUniformLocation(prog_show, "frames");		
+
+				gl.uniform1i(gl.getUniformLocation(prog_show, "uTexSamp0"), 0);
+				gl.uniform1i(gl.getUniformLocation(prog_show, "uTexSamp1"), 1);			
+
+				//
+				var posBuffer = gl.createBuffer();	
+				
+				gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);		
+			
+				var vertices = new Float32Array([-1,-1,0, 1,-1,0, -1,1,0, 1,1,0]);
+				var aPosLoc = gl.getAttribLocation(prog_pass1, "aPos");		
+			
+				gl.enableVertexAttribArray(aPosLoc);
+
+				//
+				var aTexLoc = gl.getAttribLocation(prog_pass1, "aTexCoord");
+			
+				gl.enableVertexAttribArray( aTexLoc );
+			
+				var texCoords = new Float32Array([0,0, 1,0, 0,1, 1,1]);
+				var texCoordOffset = vertices.byteLength;
+			
+				gl.bufferData(gl.ARRAY_BUFFER, texCoordOffset + texCoords.byteLength, gl.STATIC_DRAW);
+				gl.bufferSubData(gl.ARRAY_BUFFER, 0, vertices);
+				gl.bufferSubData(gl.ARRAY_BUFFER, texCoordOffset, texCoords);
+			
+				gl.vertexAttribPointer(aPosLoc, 3, gl.FLOAT, gl.FALSE, 0, 0);
+				gl.vertexAttribPointer(aTexLoc, 2, gl.FLOAT, gl.FALSE, 0, texCoordOffset);
+
+				// 
+				texture1 = gl.createTexture();			
+
+				gl.bindTexture(gl.TEXTURE_2D, texture1);			
+				gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+			
+				var pixels = [], tSize = gl.viewportWidth, centralPoint = Math.floor(tSize / 2);
+
+				var blank = [];
+			
+				for(var i = 0; i < tSize; i++) {
+					for(var j = 0; j < tSize; j++) {
+						var imPixel = 				
+							greetingImageData[(j + i * tSize) * 4 + 0] / 255 * 
+							Math.pow(
+								greetingImageData[(j + i * tSize) * 4 + 3] / 255, 
+								config.alphaFactor
+							);
+
+						imPixel /= 2;
+						
+						if(Math.random() < config.density) {											
+							pixels.push(1, 0, imPixel, 0);							
+						} else {					
+							pixels.push(config.background + Math.random() * config.backgroundRange, 0, imPixel, 0);					
+						}												
+					}
+				}
+			
+				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, tSize, tSize, 0, gl.RGBA, gl.FLOAT, new Float32Array(pixels));
+			
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+				gl.bindTexture(gl.TEXTURE_2D, null);
+
+				//
+				texture2 = gl.createTexture();
+			
+				gl.bindTexture(gl.TEXTURE_2D, texture2);
+				gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, tSize, tSize, 0, gl.RGBA, gl.FLOAT, new Float32Array(pixels));
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);		
+
+				gl.bindTexture(gl.TEXTURE_2D, null);	
+
+				//
+				FBO = gl.createFramebuffer();
+			
+				gl.bindFramebuffer(gl.FRAMEBUFFER, FBO);
+				gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture1, 0);
+
+				//
+				FBO2 = gl.createFramebuffer();
+			
+				gl.bindFramebuffer(gl.FRAMEBUFFER, FBO2);
+				gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture2, 0);
+
+				//												
+				anim();		
+			};	
+
+			//
+			function anim() {
+				if(draw()) {
+					window.requestAnimationFrame(anim);
+				}
+			};		
+
+			//
+			function draw() {
+				//
+				
+				gl.activeTexture(gl.TEXTURE0);
+
+				for(var i = 0; i < config.iterations; i++) {
+					for(var pass = 0; pass < 2; pass++) {
+						gl.useProgram(pass == 0 ? prog_pass1 : prog_pass2);
+
+						if (it > 0) {
+							gl.bindTexture(gl.TEXTURE_2D, texture1);
+							gl.bindFramebuffer(gl.FRAMEBUFFER, FBO2);
+						} else {
+					
+							gl.bindTexture(gl.TEXTURE_2D, texture2);
+							gl.bindFramebuffer(gl.FRAMEBUFFER, FBO);
+						}
+				
+						gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+						//gl.flush();
+
+						it = -it;
+					}
+				}
+
+				//
+				gl.useProgram(prog_show);				
+			
+				gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+				gl.uniform1f(prog_show.frames, frames);	
+				
+				gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);		
+				//gl.flush();
+
+				//
+				frames++;
+									
+				if(frames < config.maxFrames) {								
+					return true;
+				} else {
+					return false;
+				}
+			};
+
+			//
+			function template(str, replacements) {
+				for(var prop in replacements) {
+					var val = replacements[prop];
+				
+					if(typeof val == "number" && String(val).indexOf(".") == -1) {
+						val = val + ".0";
+					}
+			
+					str = str.replace(new RegExp("<%= " + prop + " %>", "g"), val);
+				}
+
+				return str;
+			};
+
+			//
+			function getShader(gl, id){
+				var shaderScript = document.getElementById(id);
+				var str = "";
+				var k = shaderScript.firstChild;
+		
+				while(k) {
+					if(k.nodeType == 3) str += k.textContent;
+					k = k.nextSibling;
+				}
+		
+				var shader;
+		
+				if(shaderScript.type == "x-shader/x-fragment") {
+					shader = gl.createShader(gl.FRAGMENT_SHADER);
+				} else if(shaderScript.type == "x-shader/x-vertex") {
+					shader = gl.createShader(gl.VERTEX_SHADER);
+				} else {
+					return null;
+				}
+
+				str = template(str, config);
+
+				gl.shaderSource(shader, str);
+			
+				gl.compileShader(shader);				
+						
+				if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+					alert(gl.getShaderInfoLog(shader));
+				
+					return null;
+				}
+
+				return shader;
+			};
+
+			//
+			function renderGreeting(callback) {
+				var canvas = document.createElement("canvas");
+
+				canvas.width = canvas.height = config.canvasSize;
+
+				var context = canvas.getContext('2d');			
+
+				context.fillStyle	= '#CCC';
+				context.strokeStyle	= '#CCC';								
+				context.textBaseline	= 'top';				
+				context.textAlign	= 'center';	
+
+				context.shadowBlur = config.greeting.blurRadius;
+				context.shadowColor = "rgba(255, 255, 255, 1.0)";
+
+				//
+				context.font = config.greeting.upper.font;
+
+				context.strokeText(config.greeting.upper.text, canvas.width / 2, canvas.width * config.greeting.upper.position);
+				context.fillText(config.greeting.upper.text, canvas.width / 2, canvas.width * config.greeting.upper.position);				
+				//
+				context.font = config.greeting.central.font;
+
+				context.strokeText(config.greeting.central.text, canvas.width / 2, canvas.width * config.greeting.central.position);
+				context.fillText(config.greeting.central.text, canvas.width / 2, canvas.width * config.greeting.central.position);				
+
+				//
+				context.font = config.greeting.lower.font;
+
+				var fromText = config.greeting.lower.text;
+			
+				context.strokeText(config.greeting.lower.text, canvas.width / 2, canvas.width * config.greeting.lower.position);
+				context.fillText(config.greeting.lower.text, canvas.width / 2, canvas.width * config.greeting.lower.position);	
+
+				callback(
+					new Float32Array(
+						context.getImageData(0, 0, canvas.width, canvas.height).data
+					)
+				);
+			};	
+
+			//
+			function isWebGLSupported() {		
+				try {
+					return !!window.WebGLRenderingContext && !!document.createElement('canvas').getContext('webgl');
+				} catch(e) {
+					return false;
+				}			
+			};
+
+			//			
+			$(document).ready(() => {				
+				// Check for WebGL support 
+				if(isWebGLSupported()) {
+					// Render main page template
+					$(document.body).prepend($("#page")[0].innerHTML);			
+
+					// Render greeting heat map
+					renderGreeting((data) => {
+						greetingImageData = data;
+
+						// Start the fans please!
+						main();
+					});								
+				} else {
+					alert("WebGL is not supported");
+				}
+			});
+		</script>
+
+		<style>			
+			body {
+				background: #DDD;							
+			}
+			
+			div#content {
+				position: relative;
+				
+				margin: 0 auto;
+				margin-top: 30px;
+				margin-bottom: 60px;
+								
+				width: 1024px;			
+
+				background: #FFF;				
+				padding: 15px;
+
+				border-radius: 10px;
+				box-shadow: 0 3px 3px rgba(0, 0, 0, 0.333333);				
+			}
+		
+			div#content canvas {
+				box-shadow: 0 3px 3px rgba(0, 0, 0, 0.333333);
+			}		
+		</style>		
+	</head>
+	<body>
+		<!-- Have a holly, jolly Christmas. It's the best time of the year... -->
+		<noscript><p>You must have JavaScript enabled to view your card.</p></noscript>
+	</body>
+</html>
